@@ -4,9 +4,8 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Diabetes Risk Predictor", page_icon="🩺", layout="centered")
-
 st.title("🩺 Diabetes Risk Predictor")
-st.write("This app predicts whether an individual is **at risk of diabetes** based on health indicators.")
+st.write("Predicts diabetes risk (screening only, not a medical diagnosis).")
 
 # -----------------------------
 # Load model package
@@ -14,61 +13,155 @@ st.write("This app predicts whether an individual is **at risk of diabetes** bas
 @st.cache_resource
 def load_model():
     with open("diabetes_model.pkl", "rb") as f:
-        pkg = pickle.load(f)
-    return pkg
+        return pickle.load(f)
 
 pkg = load_model()
 model = pkg["model"]
-COLUMNS = pkg["columns"]   # expected input feature names in correct order
+COLUMNS = pkg["columns"]
 TARGET = pkg.get("target", "Diabetes_binary")
 
-st.caption(f"Model loaded. Target: `{TARGET}`")
+# -----------------------------
+# Field metadata (BRFSS-style)
+# -----------------------------
+BINARY_FIELDS = {
+    "HighBP", "HighChol", "CholCheck", "Smoker", "Stroke", "HeartDiseaseorAttack",
+    "PhysActivity", "Fruits", "Veggies", "HvyAlcoholConsump", "AnyHealthcare",
+    "NoDocbcCost", "DiffWalk"
+}
+
+HELP = {
+    "BMI": "Body Mass Index. Higher BMI is often associated with higher diabetes risk.",
+    "HighBP": "High blood pressure (1 = yes, 0 = no).",
+    "HighChol": "High cholesterol (1 = yes, 0 = no).",
+    "CholCheck": "Had cholesterol check in the past 5 years (1 = yes, 0 = no).",
+    "Smoker": "Smoked at least 100 cigarettes in lifetime (1 = yes, 0 = no).",
+    "Stroke": "Ever told you had a stroke (1 = yes, 0 = no).",
+    "HeartDiseaseorAttack": "Coronary heart disease or myocardial infarction (1 = yes, 0 = no).",
+    "PhysActivity": "Physical activity in past 30 days (1 = yes, 0 = no).",
+    "Fruits": "Consume fruit 1+ times per day (1 = yes, 0 = no).",
+    "Veggies": "Consume vegetables 1+ times per day (1 = yes, 0 = no).",
+    "HvyAlcoholConsump": "Heavy alcohol consumption indicator (1 = yes, 0 = no).",
+    "AnyHealthcare": "Have any healthcare coverage (1 = yes, 0 = no).",
+    "NoDocbcCost": "Could not see doctor due to cost (1 = yes, 0 = no).",
+    "GenHlth": "General health rating (1=Excellent ... 5=Poor).",
+    "MentHlth": "Days of poor mental health in past 30 days (0–30).",
+    "PhysHlth": "Days of poor physical health in past 30 days (0–30).",
+    "DiffWalk": "Serious difficulty walking or climbing stairs (1 = yes, 0 = no).",
+    "Sex": "Sex (dataset encoding). Commonly 1=Male, 2=Female (confirm with dataset codebook).",
+    "Age": "Age category code (BRFSS uses grouped age categories).",
+    "Education": "Education level code (ordinal category).",
+    "Income": "Income level code (ordinal category).",
+}
 
 # -----------------------------
-# Build input form (auto from columns)
+# Defaults (safe starter values)
 # -----------------------------
-st.subheader("Enter health indicators")
+DEFAULTS = {col: 0 for col in COLUMNS}
+if "BMI" in DEFAULTS: DEFAULTS["BMI"] = 25.0
+if "GenHlth" in DEFAULTS: DEFAULTS["GenHlth"] = 3
+if "MentHlth" in DEFAULTS: DEFAULTS["MentHlth"] = 0
+if "PhysHlth" in DEFAULTS: DEFAULTS["PhysHlth"] = 0
+if "Age" in DEFAULTS: DEFAULTS["Age"] = 8
+if "Sex" in DEFAULTS: DEFAULTS["Sex"] = 1
+if "Education" in DEFAULTS: DEFAULTS["Education"] = 4
+if "Income" in DEFAULTS: DEFAULTS["Income"] = 5
 
-with st.form("input_form"):
-    user_inputs = {}
+# -----------------------------
+# Session state init + Reset
+# -----------------------------
+def init_state():
+    for col in COLUMNS:
+        if col not in st.session_state:
+            st.session_state[col] = DEFAULTS.get(col, 0)
 
-    # Make the UI nicer: BMI first, then the rest
-    cols_order = COLUMNS.copy()
-    if "BMI" in cols_order:
-        cols_order.remove("BMI")
-        cols_order = ["BMI"] + cols_order
+def reset_state():
+    for col in COLUMNS:
+        st.session_state[col] = DEFAULTS.get(col, 0)
 
-    for col in cols_order:
-        # Most BRFSS fields are numeric (0/1 or small integers). We'll use number_input.
-        # If you want sliders later, we can customize per feature.
-        default_val = 0.0
-        step = 1.0
+init_state()
 
-        # BMI tends to be continuous-ish
+# Sidebar options + Reset button
+st.sidebar.header("Options")
+mode = st.sidebar.radio("Input mode", ["Simple (recommended)", "Advanced (all fields)"])
+if st.sidebar.button("Reset inputs"):
+    reset_state()
+    st.rerun()
+
+# -----------------------------
+# UI helpers
+# -----------------------------
+YESNO = {"No (0)": 0, "Yes (1)": 1}
+
+def binary_select(col):
+    # Use dropdown for binary fields
+    current = int(st.session_state.get(col, 0))
+    # ensure valid
+    current = 1 if current == 1 else 0
+    label = f"{col}"
+    st.selectbox(
+        label,
+        list(YESNO.keys()),
+        index=list(YESNO.values()).index(current),
+        key=col,
+        help=HELP.get(col, "")
+    )
+
+def num_input(col, step=1.0, min_value=None, max_value=None, fmt=None):
+    label = f"{col}"
+    kwargs = dict(
+        label=label,
+        value=float(st.session_state.get(col, 0)),
+        step=float(step),
+        key=col,
+        help=HELP.get(col, "")
+    )
+    if min_value is not None:
+        kwargs["min_value"] = min_value
+    if max_value is not None:
+        kwargs["max_value"] = max_value
+    if fmt is not None:
+        kwargs["format"] = fmt
+    st.number_input(**kwargs)
+
+def slider_input(col, min_v, max_v):
+    label = f"{col}"
+    st.slider(
+        label,
+        min_v,
+        max_v,
+        int(st.session_state.get(col, DEFAULTS.get(col, min_v))),
+        key=col,
+        help=HELP.get(col, "")
+    )
+
+def make_row_from_state():
+    user_inputs = {col: st.session_state.get(col, 0) for col in COLUMNS}
+
+    # Convert binary dropdown strings to numeric if needed
+    for col in COLUMNS:
+        if col in BINARY_FIELDS:
+            # session state contains the label string from selectbox
+            # because we used key=col with selectbox
+            val = st.session_state.get(col, "No (0)")
+            user_inputs[col] = YESNO.get(val, 0)
+
+    row = pd.DataFrame([user_inputs]).reindex(columns=COLUMNS, fill_value=0)
+
+    # Ensure correct dtypes
+    for col in COLUMNS:
         if col == "BMI":
-            default_val = 25.0
-            step = 0.1
+            row[col] = row[col].astype(float)
+        else:
+            # many are integers in this dataset
+            try:
+                row[col] = row[col].astype(float)
+            except:
+                pass
 
-        user_inputs[col] = st.number_input(
-            label=col,
-            value=float(default_val),
-            step=float(step),
-            format="%.2f" if col == "BMI" else "%.0f"
-        )
+    return row
 
-    submitted = st.form_submit_button("Predict")
-
-# -----------------------------
-# Predict
-# -----------------------------
-if submitted:
-    # Create 1-row dataframe, enforce same columns/order
-    row = pd.DataFrame([user_inputs])
-    row = row.reindex(columns=COLUMNS, fill_value=0)
-
+def predict_and_show(row: pd.DataFrame):
     pred = int(model.predict(row)[0])
-
-    # Probability if available
     prob = None
     if hasattr(model, "predict_proba"):
         prob = float(model.predict_proba(row)[0][1])
@@ -80,6 +173,100 @@ if submitted:
         st.success("Prediction: **No Diabetes Risk (0)**")
 
     if prob is not None:
-        st.write(f"Estimated probability of being at risk: **{prob:.2%}**")
+        st.write(f"Estimated probability of being at risk: **{prob:.1%}**")
 
     st.caption("Note: This tool supports screening/education and is not a medical diagnosis.")
+
+# -----------------------------
+# Input UI
+# -----------------------------
+st.subheader("Enter health indicators")
+
+if mode == "Simple (recommended)":
+    st.info("Simple mode uses key inputs. Advanced mode allows editing all 21 indicators.")
+
+    with st.form("simple_form"):
+        c1, c2 = st.columns(2)
+
+        # Left column: common risk factors
+        with c1:
+            if "BMI" in COLUMNS:
+                num_input("BMI", step=0.1, min_value=0.0, fmt="%.1f")
+            for col in ["HighBP", "HighChol", "Smoker", "PhysActivity"]:
+                if col in COLUMNS:
+                    binary_select(col)
+
+        # Right column: health status
+        with c2:
+            if "GenHlth" in COLUMNS:
+                slider_input("GenHlth", 1, 5)
+            if "MentHlth" in COLUMNS:
+                num_input("MentHlth", step=1.0, min_value=0.0, max_value=30.0, fmt="%.0f")
+            if "PhysHlth" in COLUMNS:
+                num_input("PhysHlth", step=1.0, min_value=0.0, max_value=30.0, fmt="%.0f")
+            if "DiffWalk" in COLUMNS:
+                binary_select("DiffWalk")
+
+        # Optional demographics (still simple)
+        st.markdown("**Optional demographics (improves accuracy):**")
+        d1, d2 = st.columns(2)
+        with d1:
+            if "Age" in COLUMNS:
+                num_input("Age", step=1.0, min_value=1.0, fmt="%.0f")
+            if "Sex" in COLUMNS:
+                num_input("Sex", step=1.0, min_value=0.0, fmt="%.0f")
+        with d2:
+            if "Education" in COLUMNS:
+                num_input("Education", step=1.0, min_value=0.0, fmt="%.0f")
+            if "Income" in COLUMNS:
+                num_input("Income", step=1.0, min_value=0.0, fmt="%.0f")
+
+        submitted = st.form_submit_button("Predict")
+
+    if submitted:
+        row = make_row_from_state()
+        predict_and_show(row)
+
+else:
+    st.warning("Advanced mode shows all fields. Binary fields use Yes/No dropdowns.")
+
+    with st.form("advanced_form"):
+        with st.expander("Vitals & Conditions", expanded=True):
+            if "BMI" in COLUMNS:
+                num_input("BMI", step=0.1, min_value=0.0, fmt="%.1f")
+            for col in ["HighBP", "HighChol", "CholCheck", "Stroke", "HeartDiseaseorAttack"]:
+                if col in COLUMNS:
+                    if col in BINARY_FIELDS:
+                        binary_select(col)
+                    else:
+                        num_input(col)
+
+        with st.expander("Lifestyle", expanded=False):
+            for col in ["Smoker", "PhysActivity", "Fruits", "Veggies", "HvyAlcoholConsump"]:
+                if col in COLUMNS:
+                    binary_select(col)
+
+        with st.expander("Healthcare Access", expanded=False):
+            for col in ["AnyHealthcare", "NoDocbcCost"]:
+                if col in COLUMNS:
+                    binary_select(col)
+
+        with st.expander("General Health & Demographics", expanded=False):
+            for col in ["GenHlth", "MentHlth", "PhysHlth", "DiffWalk", "Sex", "Age", "Education", "Income"]:
+                if col in COLUMNS:
+                    if col in BINARY_FIELDS:
+                        binary_select(col)
+                    elif col == "GenHlth":
+                        slider_input("GenHlth", 1, 5)
+                    elif col in ["MentHlth", "PhysHlth"]:
+                        num_input(col, step=1.0, min_value=0.0, max_value=30.0, fmt="%.0f")
+                    elif col == "BMI":
+                        num_input("BMI", step=0.1, min_value=0.0, fmt="%.1f")
+                    else:
+                        num_input(col, step=1.0, min_value=0.0, fmt="%.0f")
+
+        submitted = st.form_submit_button("Predict")
+
+    if submitted:
+        row = make_row_from_state()
+        predict_and_show(row)
