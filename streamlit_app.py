@@ -90,43 +90,46 @@ if st.sidebar.button("Reset inputs"):
 # -----------------------------
 # UI helpers
 # -----------------------------
-YESNO = {"No (0)": 0, "Yes (1)": 1}
-
 def binary_select(col):
-    # Use dropdown for binary fields
-    current = int(st.session_state.get(col, 0))
-    # ensure valid
+    """
+    Stores numeric 0/1 in session_state (prevents crashes like int("No (0)")).
+    Displays friendly labels using format_func.
+    """
+    current = st.session_state.get(col, 0)
+    try:
+        current = int(current)
+    except:
+        current = 0
     current = 1 if current == 1 else 0
-    label = f"{col}"
+
     st.selectbox(
-        label,
-        list(YESNO.keys()),
-        index=list(YESNO.values()).index(current),
+        col,
+        options=[0, 1],
+        index=current,
+        format_func=lambda v: "No (0)" if v == 0 else "Yes (1)",
         key=col,
         help=HELP.get(col, "")
     )
 
 def num_input(col, step=1.0, min_value=None, max_value=None, fmt=None):
-    label = f"{col}"
     kwargs = dict(
-        label=label,
-        value=float(st.session_state.get(col, 0)),
+        label=col,
+        value=float(st.session_state.get(col, DEFAULTS.get(col, 0))),
         step=float(step),
         key=col,
         help=HELP.get(col, "")
     )
     if min_value is not None:
-        kwargs["min_value"] = min_value
+        kwargs["min_value"] = float(min_value)
     if max_value is not None:
-        kwargs["max_value"] = max_value
+        kwargs["max_value"] = float(max_value)
     if fmt is not None:
         kwargs["format"] = fmt
     st.number_input(**kwargs)
 
 def slider_input(col, min_v, max_v):
-    label = f"{col}"
     st.slider(
-        label,
+        col,
         min_v,
         max_v,
         int(st.session_state.get(col, DEFAULTS.get(col, min_v))),
@@ -135,29 +138,12 @@ def slider_input(col, min_v, max_v):
     )
 
 def make_row_from_state():
-    user_inputs = {col: st.session_state.get(col, 0) for col in COLUMNS}
-
-    # Convert binary dropdown strings to numeric if needed
-    for col in COLUMNS:
-        if col in BINARY_FIELDS:
-            # session state contains the label string from selectbox
-            # because we used key=col with selectbox
-            val = st.session_state.get(col, "No (0)")
-            user_inputs[col] = YESNO.get(val, 0)
-
+    """
+    Build a 1-row dataframe with EXACT expected columns/order.
+    Binary fields are already numeric because binary_select stores 0/1.
+    """
+    user_inputs = {col: st.session_state.get(col, DEFAULTS.get(col, 0)) for col in COLUMNS}
     row = pd.DataFrame([user_inputs]).reindex(columns=COLUMNS, fill_value=0)
-
-    # Ensure correct dtypes
-    for col in COLUMNS:
-        if col == "BMI":
-            row[col] = row[col].astype(float)
-        else:
-            # many are integers in this dataset
-            try:
-                row[col] = row[col].astype(float)
-            except:
-                pass
-
     return row
 
 def predict_and_show(row: pd.DataFrame):
@@ -207,7 +193,7 @@ if mode == "Simple (recommended)":
             if "DiffWalk" in COLUMNS:
                 binary_select("DiffWalk")
 
-        # Optional demographics (still simple)
+        # Optional demographics
         st.markdown("**Optional demographics (improves accuracy):**")
         d1, d2 = st.columns(2)
         with d1:
@@ -260,8 +246,6 @@ else:
                         slider_input("GenHlth", 1, 5)
                     elif col in ["MentHlth", "PhysHlth"]:
                         num_input(col, step=1.0, min_value=0.0, max_value=30.0, fmt="%.0f")
-                    elif col == "BMI":
-                        num_input("BMI", step=0.1, min_value=0.0, fmt="%.1f")
                     else:
                         num_input(col, step=1.0, min_value=0.0, fmt="%.0f")
 
