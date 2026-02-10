@@ -105,6 +105,31 @@ HELP = {
     "Income": "Income level code (ordinal category).",
 }
 
+DISPLAY_NAME = {
+    "BMI": "Body Mass Index (BMI)",
+    "HighBP": "High Blood Pressure",
+    "HighChol": "High Cholesterol",
+    "CholCheck": "Cholesterol Checked (Last 5 Years)",
+    "Smoker": "Smoker (100+ cigarettes lifetime)",
+    "Stroke": "History of Stroke",
+    "HeartDiseaseorAttack": "Heart Disease / Heart Attack History",
+    "PhysActivity": "Physical Activity (Past 30 Days)",
+    "Fruits": "Eats Fruits Daily",
+    "Veggies": "Eats Vegetables Daily",
+    "HvyAlcoholConsump": "Heavy Alcohol Consumption",
+    "AnyHealthcare": "Has Healthcare Coverage",
+    "NoDocbcCost": "Could Not See Doctor Due to Cost",
+    "GenHlth": "Overall Health Rating",
+    "MentHlth": "Poor Mental Health Days (Past 30 Days)",
+    "PhysHlth": "Poor Physical Health Days (Past 30 Days)",
+    "DiffWalk": "Difficulty Walking / Climbing Stairs",
+    "Sex": "Sex (1=Male, 2=Female)",
+    "Age": "Age Group Code",
+    "Education": "Education Level Code",
+    "Income": "Income Level Code",
+}
+
+
 # -----------------------------
 # Defaults (safe starter values)
 # -----------------------------
@@ -158,21 +183,25 @@ def binary_select(col):
         current = 0
     current = 1 if current == 1 else 0
 
+    label = DISPLAY_NAME.get(col, col)
+
     st.selectbox(
-        col,
+        label,
         options=[0, 1],
         index=current,
         format_func=lambda v: "No (0)" if v == 0 else "Yes (1)",
-        key=col,
+        key=col,  # IMPORTANT: keep key as the original column name
         help=HELP.get(col, "")
     )
 
 def num_input(col, step=1.0, min_value=None, max_value=None, fmt=None):
+    label = DISPLAY_NAME.get(col, col)
+
     kwargs = dict(
-        label=col,
+        label=label,
         value=float(st.session_state.get(col, DEFAULTS.get(col, 0))),
         step=float(step),
-        key=col,
+        key=col,  # keep key
         help=HELP.get(col, "")
     )
     if min_value is not None:
@@ -184,14 +213,17 @@ def num_input(col, step=1.0, min_value=None, max_value=None, fmt=None):
     st.number_input(**kwargs)
 
 def slider_input(col, min_v, max_v):
+    label = DISPLAY_NAME.get(col, col)
+
     st.slider(
-        col,
+        label,
         min_v,
         max_v,
         int(st.session_state.get(col, DEFAULTS.get(col, min_v))),
-        key=col,
+        key=col,  # keep key
         help=HELP.get(col, "")
     )
+
 
 def make_row_from_state():
     user_inputs = {col: st.session_state.get(col, DEFAULTS.get(col, 0)) for col in COLUMNS}
